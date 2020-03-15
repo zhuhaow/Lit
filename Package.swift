@@ -4,11 +4,11 @@
 import PackageDescription
 
 let package = Package(
-    name: "nekit2",
+    name: "Lit",
     products: [
         .library(
-            name: "nekit2",
-            targets: ["nekit2"]
+            name: "Lit",
+            targets: ["Lit"]
         ),
     ],
     dependencies: [
@@ -17,12 +17,12 @@ let package = Package(
     ],
     targets: [
         .target(
-            name: "nekit2",
+            name: "Lit",
             dependencies: []
         ),
         .testTarget(
-            name: "nekit2Tests",
-            dependencies: ["nekit2"]
+            name: "LitTests",
+            dependencies: ["Lit"]
         ),
     ]
 )

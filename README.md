@@ -1,3 +1,3 @@
-# nekit2
+# Lit
 
 A description of this package.
