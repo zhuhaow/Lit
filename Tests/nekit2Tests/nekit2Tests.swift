@@ -10,6 +10,6 @@ final class nekit2Tests: XCTestCase {
     }
 
     static var allTests = [
-        ("testExample", testExample)
+        ("testExample", testExample),
     ]
 }

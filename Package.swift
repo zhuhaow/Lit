@@ -9,11 +9,11 @@ let package = Package(
         .library(
             name: "nekit2",
             targets: ["nekit2"]
-        )
+        ),
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-nio.git", from: "2.0.0"),
-        .package(url: "https://github.com/apple/swift-nio-transport-services.git", from: "1.0.0")
+        .package(url: "https://github.com/apple/swift-nio-transport-services.git", from: "1.0.0"),
     ],
     targets: [
         .target(
@@ -23,6 +23,6 @@ let package = Package(
         .testTarget(
             name: "nekit2Tests",
             dependencies: ["nekit2"]
-        )
+        ),
     ]
 )

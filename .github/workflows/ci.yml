@@ -3,12 +3,14 @@ name: CI
 on: [pull_request, push]
 
 jobs:
-  SwiftLint:
-    runs-on: ubuntu-latest
+  SwiftFormat:
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v2
-      - name: GitHub Action for SwiftLint
-        uses: norio-nomura/action-swiftlint@3.1.0
+      - name: Install SwiftFormat
+        run: brew install swiftformat
+      - name: Lint
+        run: swiftformat --lint .
 
   macOS:
     runs-on: macos-latest
