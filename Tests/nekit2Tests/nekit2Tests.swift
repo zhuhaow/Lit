@@ -1,5 +1,5 @@
-import XCTest
 @testable import nekit2
+import XCTest
 
 final class nekit2Tests: XCTestCase {
     func testExample() {
@@ -10,6 +10,6 @@ final class nekit2Tests: XCTestCase {
     }
 
     static var allTests = [
-        ("testExample", testExample),
+        ("testExample", testExample)
     ]
 }
