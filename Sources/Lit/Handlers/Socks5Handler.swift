@@ -156,8 +156,9 @@ public final class Socks5Handler: ChannelDuplexHandler, RemovableChannelHandler 
 
     private func consumeBuffer(buffer: inout ByteBuffer) -> ByteBuffer {
         if var cache = cache {
-            cache.writeBuffer(&buffer)
+            // Avoid CoW
             self.cache = nil
+            cache.writeBuffer(&buffer)
             return cache
         } else {
             return buffer
