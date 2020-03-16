@@ -18,7 +18,7 @@ let package = Package(
     targets: [
         .target(
             name: "Lit",
-            dependencies: []
+            dependencies: ["NIO"]
         ),
         .testTarget(
             name: "LitTests",
