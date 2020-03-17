@@ -60,7 +60,7 @@ extension GlueHandler {
     }
 
     private var partnerWritable: Bool {
-        return context?.channel.isWritable ?? false
+        context?.channel.isWritable ?? false
     }
 }
 
