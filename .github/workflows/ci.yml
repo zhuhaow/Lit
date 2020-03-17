@@ -17,7 +17,9 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - name: Test target
-        run: swift test -v
+        run: swift test -v --enable-code-coverage
+      - name: Upload coverage report
+        run: bash <(curl -s https://codecov.io/bash) -D ./.build -J Lit
 
   Linux:
     runs-on: ubuntu-latest
@@ -25,4 +27,6 @@ jobs:
       - uses: actions/checkout@v2
       - uses: YOCKOW/Action-setup-swift@v1.1.0
       - name: Test target
-        run: swift test -v
+        run: swift test -v --enable-code-coverage
+      - name: Upload coverage report
+        run: bash <(curl -s https://codecov.io/bash) -D ./.build -J Lit
