@@ -228,10 +228,7 @@ public final class Socks5Handler: ChannelDuplexHandler, RemovableChannelHandler 
         buffer.writeInteger(response.rawValue)
         buffer.writeInteger(0 as UInt8)
         buffer.writeInteger(typeValue)
-        while buffer.writableBytes > 0 {
-            // TODO: make it faster.
-            buffer.writeInteger(0 as UInt8)
-        }
+        buffer.writeBytes([UInt8](repeating: 0, count: buffer.writableBytes))
 
         return buffer
     }
