@@ -1,7 +1,7 @@
 import XCTest
 
-import nekit2Tests
+import LitTests
 
 var tests = [XCTestCaseEntry]()
-tests += nekit2Tests.allTests()
+tests += LitTests.allTests()
 XCTMain(tests)
