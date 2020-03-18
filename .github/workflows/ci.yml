@@ -18,8 +18,15 @@ jobs:
       - uses: actions/checkout@v2
       - name: Test target
         run: swift test -v --enable-code-coverage
+      - name: Process coverage report
+        run: >
+          llvm-cov show
+          .build/x86_64-apple-macosx/debug/LitPackageTests.xctest/Contents/MacOS/LitPackageTests
+          --instr-profile=.build/x86_64-apple-macosx/debug/codecov/default.profdata
+          --ignore-filename-regex=".build|Tests"
+          > coverage.txt
       - name: Upload coverage report
-        run: bash <(curl -s https://codecov.io/bash) -D ./.build -J Lit
+        run: bash <(curl -s https://codecov.io/bash)
 
   Linux:
     runs-on: ubuntu-latest
@@ -28,5 +35,12 @@ jobs:
       - uses: YOCKOW/Action-setup-swift@v1.1.0
       - name: Test target
         run: swift test -v --enable-code-coverage
+      - name: Process coverage report
+        run: >
+          llvm-cov show
+          .build/x86_64-unknown-linux/debug/LitPackageTests.xctest/Contents/MacOS/LitPackageTests
+          --instr-profile=.build/x86_64-unknown-linux/debug/codecov/default.profdata
+          --ignore-filename-regex=".build|Tests"
+          > coverage.txt
       - name: Upload coverage report
-        run: bash <(curl -s https://codecov.io/bash) -D ./.build -J Lit
+        run: bash <(curl -s https://codecov.io/bash)
