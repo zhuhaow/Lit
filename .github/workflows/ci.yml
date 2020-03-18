@@ -20,7 +20,7 @@ jobs:
         run: swift test -v --enable-code-coverage
       - name: Process coverage report
         run: >
-          llvm-cov show
+          xcrun llvm-cov show
           .build/x86_64-apple-macosx/debug/LitPackageTests.xctest/Contents/MacOS/LitPackageTests
           --instr-profile=.build/x86_64-apple-macosx/debug/codecov/default.profdata
           --ignore-filename-regex=".build|Tests"
