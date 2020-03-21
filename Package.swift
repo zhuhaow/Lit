@@ -22,7 +22,7 @@ let package = Package(
         ),
         .testTarget(
             name: "LitTests",
-            dependencies: ["Lit"]
+            dependencies: ["Lit", "NIOConcurrencyHelpers"]
         ),
     ]
 )
