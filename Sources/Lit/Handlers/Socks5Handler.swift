@@ -1,131 +1,202 @@
 import NIO
 
+public enum Socks5HandlerError: Error {
+    case unsupportedVersion
+    case noAuthMethodSpecified
+    case tooManyMethods
+    case noSupportedMethod
+    case unSupportedCommand
+    case protocolError
+    case invalidDomainLength
+    case invalidAddressType
+}
+
+public enum Socks5Request {
+    case method
+    case connectToAddress(SocketAddress)
+    case connectTo(host: String, port: Int)
+}
+
+public enum Socks5ResponseType: UInt8 {
+    case succeeded
+    case generalFailue
+    case connectionNotAllowed
+    case networkUnreachable
+    case connectionRefused
+    case ttlExpired
+    case commandNotSupported
+    case addressTypeNotSupported
+}
+
+public enum Socks5Response {
+    case method
+    case connected(Socks5ResponseType)
+}
+
 public final class Socks5Handler: ChannelDuplexHandler, RemovableChannelHandler {
-    public typealias InboundIn = ByteBuffer
+    public typealias InboundIn = Socks5Request
     public typealias InboundOut = Never
 
     public typealias OutboundIn = Never
-    public typealias OutboundOut = ByteBuffer
-
-    enum AddressType {
-        case ipv4, domain, ipv6
-    }
+    public typealias OutboundOut = Socks5Response
 
     enum Socks5HandlerStatus {
         case readingVersionAndMethods
         case readingConnectHeader
-        case waitingConnection(AddressType)
-    }
-
-    public enum Socks5HandlerError: Error {
-        case unsupportedVersion
-        case noAuthMethodSpecified
-        case tooManyMethods
-        case noSupportedMethod
-        case unSupportedCommand
-        case protocolError
-        case invalidDomainLength
-        case invalidAddressType
-    }
-
-    enum Socks5ResponseType: UInt8 {
-        case succeeded
-        case generalFailue
-        case connectionNotAllowed
-        case networkUnreachable
-        case connectionRefused
-        case ttlExpired
-        case commandNotSupported
-        case addressTypeNotSupported
     }
 
     let connector: Connector
     var status: Socks5HandlerStatus = .readingVersionAndMethods
-    var cache: ByteBuffer?
 
     init(connector: Connector) {
         self.connector = connector
     }
 
-    public func channelRead(context: ChannelHandlerContext, data: NIOAny) {
-        var buffer = unwrapInboundIn(data)
-        buffer = consumeBuffer(buffer: &buffer)
+    private static let encoderHandlerName = "LIT_SOCKS5_ENCODER"
+    private static let decoderHandlerName = "LIT_SOCKS5_DECODER"
 
+    public func addSelfAndCodec(to pipeline: ChannelPipeline) -> EventLoopFuture<Void> {
+        pipeline.addHandler(ByteToMessageHandler(Socks5Decoder()), name: Socks5Handler.decoderHandlerName, position: .last)
+            .flatMap {
+                pipeline.addHandler(MessageToByteHandler(Socks5Encoder()), name: Socks5Handler.encoderHandlerName, position: .last)
+            }
+            .flatMap {
+                pipeline.addHandler(self)
+            }
+    }
+
+    public func handlerAdded(context: ChannelHandlerContext) {
+        context.read()
+    }
+
+    public func channelRead(context: ChannelHandlerContext, data: NIOAny) {
+        let request = unwrapInboundIn(data)
+
+        let future: EventLoopFuture<Channel>
+        switch request {
+        case .method:
+            context.write(wrapOutboundOut(.method)).whenSuccess {
+                context.read()
+            }
+            return
+        case let .connectToAddress(address):
+            future = connector.connect(on: context.eventLoop, to: address)
+        case let .connectTo(host: host, port: port):
+            future = connector.connect(on: context.eventLoop, host: host, port: port)
+        }
+
+        future.whenComplete { result in
+            switch result {
+            case let .success(channel):
+                context.writeAndFlush(self.wrapOutboundOut(.connected(.succeeded)), promise: nil)
+
+                let (localGlue, peerGlue) = GlueHandler.matchedPair()
+                // Note this all happens in the same event loop so the handlers are properly set up when this block is finished.
+                // No need to worry if there will be any data coming in in the middle.
+                context.channel.pipeline.addHandler(localGlue).and(channel.pipeline.addHandler(peerGlue))
+                    .flatMap { _ in
+                        context.pipeline.removeHandler(self)
+                            .flatMap {
+                                context.pipeline.removeHandler(name: Socks5Handler.decoderHandlerName)
+                                    .flatMap {
+                                        context.pipeline.removeHandler(name: Socks5Handler.encoderHandlerName)
+                                    }
+                            }
+                    }
+                    .whenComplete { result in
+                        switch result {
+                        case .success:
+                            context.read()
+                            channel.read()
+                        case let .failure(error):
+                            context.fireErrorCaught(error)
+                        }
+                    }
+            case let .failure(error):
+                // TODO: write error back
+                context.fireErrorCaught(error)
+            }
+        }
+    }
+}
+
+private class Socks5Decoder: ByteToMessageDecoder {
+    typealias InboundOut = Socks5Request
+
+    enum Socks5HandlerStatus {
+        case readingVersionAndMethods
+        case readingConnectHeader
+        case done
+    }
+
+    var status: Socks5HandlerStatus = .readingVersionAndMethods
+
+    func decode(context: ChannelHandlerContext, buffer: inout ByteBuffer) throws -> DecodingState {
         switch status {
         case .readingVersionAndMethods:
-            readVersionAndMethod(context: context, buffer: &buffer)
+            return try readVersionAndMethod(context: context, buffer: &buffer)
         case .readingConnectHeader:
-            readConnectHeader(context: context, buffer: &buffer)
-        case .waitingConnection:
-            context.fireErrorCaught(Socks5HandlerError.protocolError)
+            return try readConnectHeader(context: context, buffer: &buffer)
+        case .done:
+            throw Socks5HandlerError.protocolError
         }
     }
 
-    private func readVersionAndMethod(context: ChannelHandlerContext, buffer: inout ByteBuffer) {
+    func readVersionAndMethod(context: ChannelHandlerContext, buffer: inout ByteBuffer) throws -> DecodingState {
         guard buffer.readableBytes >= 3 else {
-            cacheBuffer(buffer: &buffer)
-            return
+            return .needMoreData
         }
 
         guard buffer.readInteger(as: UInt8.self)! == 5 else {
-            context.fireErrorCaught(Socks5HandlerError.unsupportedVersion)
-            return
+            throw Socks5HandlerError.unsupportedVersion
         }
 
         guard let methodCount = buffer.readInteger(as: UInt8.self), methodCount > 0 else {
-            context.fireErrorCaught(Socks5HandlerError.noAuthMethodSpecified)
-            return
+            throw Socks5HandlerError.noAuthMethodSpecified
         }
 
         guard buffer.readableBytes == methodCount else {
             if methodCount > buffer.readableBytes {
-                context.fireErrorCaught(Socks5HandlerError.tooManyMethods)
+                throw Socks5HandlerError.tooManyMethods
             } else {
-                cacheBuffer(buffer: &buffer)
+                buffer.moveReaderIndex(to: buffer.readerIndex - 2)
+                return .needMoreData
             }
-            return
         }
 
         // Don't support any auth yet
         guard buffer.readBytes(length: Int(methodCount))!.reduce(false, { $1 == 0 }) else {
-            context.fireErrorCaught(Socks5HandlerError.noSupportedMethod)
-            return
+            throw Socks5HandlerError.noSupportedMethod
         }
 
-        buffer.clear()
-        buffer.writeBytes([5, 0])
-        context.write(wrapOutboundOut(buffer), promise: nil)
+        context.fireChannelRead(wrapInboundOut(.method))
         status = .readingConnectHeader
+        return .needMoreData
     }
 
-    private func readConnectHeader(context: ChannelHandlerContext, buffer: inout ByteBuffer) {
+    private func readConnectHeader(context: ChannelHandlerContext, buffer: inout ByteBuffer) throws -> DecodingState {
         guard buffer.readableBytes > 6 else {
-            cacheBuffer(buffer: &buffer)
-            return
+            return .needMoreData
         }
 
         guard buffer.readInteger(as: UInt8.self) == 5 else {
-            context.fireErrorCaught(Socks5HandlerError.unsupportedVersion)
-            return
+            throw Socks5HandlerError.unsupportedVersion
         }
 
         // Only TCP connect is supported.
         guard buffer.readInteger(as: UInt8.self) == 1 else {
-            context.fireErrorCaught(Socks5HandlerError.unSupportedCommand)
-            return
+            throw Socks5HandlerError.unSupportedCommand
         }
 
         guard buffer.readInteger(as: UInt8.self) == 0 else {
-            context.fireErrorCaught(Socks5HandlerError.protocolError)
-            return
+            throw Socks5HandlerError.protocolError
         }
 
-        let future: EventLoopFuture<Channel>
         switch buffer.readInteger(as: UInt8.self) {
         case 1:
             guard buffer.readableBytes == 6 else {
-                cacheBuffer(buffer: &buffer)
-                return
+                buffer.moveReaderIndex(to: buffer.readerIndex - 3)
+                return .needMoreData
             }
 
             var addr = sockaddr_in()
@@ -134,28 +205,26 @@ public final class Socks5Handler: ChannelDuplexHandler, RemovableChannelHandler 
                 (4, $0.load(as: in_addr.self))
             }
             addr.sin_port = buffer.readInteger(endianness: .big, as: UInt16.self)!
-            future = connector.connect(on: context.eventLoop, to: .init(addr, host: ""))
-            status = .waitingConnection(.ipv4)
+            context.fireChannelRead(wrapInboundOut(.connectToAddress(SocketAddress(addr, host: ""))))
+            status = .done
         case 3:
             guard let domainLength = buffer.readInteger(as: UInt8.self), domainLength > 0 else {
-                context.fireErrorCaught(Socks5HandlerError.invalidDomainLength)
-                return
+                throw Socks5HandlerError.invalidDomainLength
             }
 
             guard buffer.readableBytes == domainLength + 2 else {
                 if buffer.readableBytes < domainLength + 2 {
-                    cacheBuffer(buffer: &buffer)
-                    return
+                    buffer.moveReaderIndex(to: buffer.readerIndex - 4)
+                    return .needMoreData
                 } else {
-                    context.fireErrorCaught(Socks5HandlerError.protocolError)
-                    return
+                    throw Socks5HandlerError.protocolError
                 }
             }
 
             let host = buffer.readString(length: Int(domainLength))!
             let port = buffer.readInteger(endianness: .big, as: UInt16.self)!
-            future = connector.connect(on: context.eventLoop, host: host, port: Int(port))
-            status = .waitingConnection(.domain)
+            context.fireChannelRead(wrapInboundOut(.connectTo(host: host, port: Int(port))))
+            status = .done
         case 4:
             var addr = sockaddr_in6()
             addr.sin6_family = sa_family_t(AF_INET6)
@@ -163,73 +232,45 @@ public final class Socks5Handler: ChannelDuplexHandler, RemovableChannelHandler 
                 (16, $0.load(as: in6_addr.self))
             }
             addr.sin6_port = buffer.readInteger(endianness: .big, as: UInt16.self)!
-            future = connector.connect(on: context.eventLoop, to: .init(addr, host: ""))
-            status = .waitingConnection(.ipv6)
+            context.fireChannelRead(wrapInboundOut(.connectToAddress(SocketAddress(addr, host: ""))))
+            status = .done
         default:
-            context.fireErrorCaught(Socks5HandlerError.invalidAddressType)
-            return
+            throw Socks5HandlerError.invalidAddressType
         }
 
-        future.whenComplete { result in
-            switch result {
-            case let .success(channel):
-                guard case let .waitingConnection(type) = self.status else {
-                    return
-                }
+        return .needMoreData
+    }
 
-                let buffer = self.build(response: .succeeded, for: type, with: context.channel.allocator)
-                context.writeAndFlush(self.wrapOutboundOut(buffer), promise: nil)
+    func decodeLast(context: ChannelHandlerContext, buffer: inout ByteBuffer, seenEOF _: Bool) throws -> DecodingState {
+        // Generally this shouldn't be called with any data.
+        try decode(context: context, buffer: &buffer)
+    }
+}
 
-                let (localGlue, peerGlue) = GlueHandler.matchedPair()
-                context.channel.pipeline.addHandler(localGlue).and(channel.pipeline.addHandler(peerGlue)).whenComplete { _ in
-                    context.pipeline.removeHandler(self, promise: nil)
-                }
-            case let .failure(error):
-                context.fireErrorCaught(error)
+private class Socks5Encoder: MessageToByteEncoder {
+    typealias OutboundIn = Socks5Response
+
+    func encode(data: Socks5Response, out: inout ByteBuffer) throws {
+        switch data {
+        case .method:
+            out.writeBytes([5, 0])
+        case let .connected(response):
+            switch response {
+            case .succeeded:
+                out.writeInteger(5 as UInt8)
+                out.writeInteger(Socks5ResponseType.succeeded.rawValue)
+                out.writeInteger(0 as UInt8)
+                // Write back ipv4 address 0.0.0.0 back as it's useless.
+                out.writeInteger(1 as UInt8)
+                out.writeBytes([UInt8](repeating: 0, count: 6))
+
+            default:
+                out.writeInteger(5 as UInt8)
+                out.writeInteger(Socks5ResponseType.generalFailue.rawValue)
+                out.writeInteger(0 as UInt8)
+                out.writeInteger(1)
+                out.writeBytes([UInt8](repeating: 0, count: 6))
             }
         }
-    }
-
-    private func consumeBuffer(buffer: inout ByteBuffer) -> ByteBuffer {
-        if var cache = cache {
-            // Avoid CoW
-            self.cache = nil
-            cache.writeBuffer(&buffer)
-            return cache
-        } else {
-            return buffer
-        }
-    }
-
-    private func cacheBuffer(buffer: inout ByteBuffer) {
-        buffer.moveReaderIndex(to: 0)
-        cache = buffer
-    }
-
-    private func build(response: Socks5ResponseType, for type: AddressType, with allocator: ByteBufferAllocator) -> ByteBuffer {
-        guard case let .waitingConnection(type) = status else {
-            preconditionFailure()
-        }
-
-        let length: Int
-        let typeValue: UInt8
-        switch type {
-        case .ipv4, .domain:
-            length = 4
-            typeValue = 1
-        case .ipv6:
-            length = 16
-            typeValue = 4
-        }
-
-        var buffer = allocator.buffer(capacity: 6 + length)
-
-        buffer.writeInteger(5 as UInt8)
-        buffer.writeInteger(response.rawValue)
-        buffer.writeInteger(0 as UInt8)
-        buffer.writeInteger(typeValue)
-        buffer.writeBytes([UInt8](repeating: 0, count: buffer.writableBytes))
-
-        return buffer
     }
 }
