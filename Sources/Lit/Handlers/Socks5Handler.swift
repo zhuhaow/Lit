@@ -11,7 +11,7 @@ public enum Socks5HandlerError: Error {
     case invalidAddressType
 }
 
-public enum Socks5Request {
+public enum Socks5Request: Equatable {
     case method
     case connectToAddress(SocketAddress)
     case connectTo(host: String, port: Int)
@@ -28,7 +28,7 @@ public enum Socks5ResponseType: UInt8 {
     case addressTypeNotSupported
 }
 
-public enum Socks5Response {
+public enum Socks5Response: Equatable {
     case method
     case connected(Socks5ResponseType)
 }
@@ -120,7 +120,7 @@ public final class Socks5Handler: ChannelDuplexHandler, RemovableChannelHandler 
     }
 }
 
-private class Socks5Decoder: ByteToMessageDecoder {
+class Socks5Decoder: ByteToMessageDecoder {
     typealias InboundOut = Socks5Request
 
     enum Socks5HandlerStatus {
@@ -247,7 +247,7 @@ private class Socks5Decoder: ByteToMessageDecoder {
     }
 }
 
-private class Socks5Encoder: MessageToByteEncoder {
+class Socks5Encoder: MessageToByteEncoder {
     typealias OutboundIn = Socks5Response
 
     func encode(data: Socks5Response, out: inout ByteBuffer) throws {

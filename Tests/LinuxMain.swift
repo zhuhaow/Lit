@@ -3,5 +3,6 @@ import XCTest
 import LitTests
 
 var tests = [XCTestCaseEntry]()
-tests += LitTests.allTests()
+tests += LitTests.__allTests()
+
 XCTMain(tests)

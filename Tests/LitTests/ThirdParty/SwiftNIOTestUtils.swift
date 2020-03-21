@@ -12,9 +12,9 @@
 //
 //===----------------------------------------------------------------------===//
 
-import XCTest
 @testable import NIO
 import NIOConcurrencyHelpers
+import XCTest
 
 func withPipe(_ body: (NIO.NIOFileHandle, NIO.NIOFileHandle) throws -> [NIO.NIOFileHandle]) throws {
     var fds: [Int32] = [-1, -1]
@@ -24,7 +24,7 @@ func withPipe(_ body: (NIO.NIOFileHandle, NIO.NIOFileHandle) throws -> [NIO.NIOF
     let readFH = NIOFileHandle(descriptor: fds[0])
     let writeFH = NIOFileHandle(descriptor: fds[1])
     var toClose: [NIOFileHandle] = [readFH, writeFH]
-    var error: Error? = nil
+    var error: Error?
     do {
         toClose = try body(readFH, writeFH)
     } catch let err {
@@ -50,13 +50,13 @@ func withTemporaryDirectory<T>(_ body: (String) throws -> T) rethrows -> T {
 ///
 /// If the temporary directory is too long to store a UNIX domain socket path, it will `chdir` into the temporary
 /// directory and return a short-enough path. The iOS simulator is known to have too long paths.
-func withTemporaryUnixDomainSocketPathName<T>(directory: String = temporaryDirectory,
+func withTemporaryUnixDomainSocketPathName<T>(directory _: String = temporaryDirectory,
                                               _ body: (String) throws -> T) throws -> T {
     // this is racy but we're trying to create the shortest possible path so we can't add a directory...
     let (fd, path) = openTemporaryFile()
     try! Posix.close(descriptor: fd)
     try! FileManager.default.removeItem(atPath: path)
-    
+
     let saveCurrentDirectory = FileManager.default.currentDirectoryPath
     let restoreSavedCWD: Bool
     let shortEnoughPath: String
@@ -96,7 +96,7 @@ func withTemporaryFile<T>(content: String? = nil, _ body: (NIO.NIOFileHandle, St
             while toWrite > 0 {
                 let res = try Posix.write(descriptor: fd, pointer: start, size: toWrite)
                 switch res {
-                case .processed(let written):
+                case let .processed(written):
                     toWrite -= written
                     start = start + written
                 case .wouldBlock:
@@ -109,31 +109,30 @@ func withTemporaryFile<T>(content: String? = nil, _ body: (NIO.NIOFileHandle, St
     }
     return try body(fileHandle, path)
 }
+
 var temporaryDirectory: String {
-    get {
-        #if targetEnvironment(simulator)
+    #if targetEnvironment(simulator)
         // Simulator temp directories are so long (and contain the user name) that they're not usable
         // for UNIX Domain Socket paths (which are limited to 103 bytes).
         return "/tmp"
-        #else
+    #else
         #if os(Android)
-        return "/data/local/tmp"
+            return "/data/local/tmp"
         #elseif os(Linux)
-        return "/tmp"
-        #else
-        if #available(macOS 10.12, iOS 10, tvOS 10, watchOS 3, *) {
-            return FileManager.default.temporaryDirectory.path
-        } else {
             return "/tmp"
-        }
+        #else
+            if #available(macOS 10.12, iOS 10, tvOS 10, watchOS 3, *) {
+                return FileManager.default.temporaryDirectory.path
+            } else {
+                return "/tmp"
+            }
         #endif // os
-        #endif // targetEnvironment
-    }
+    #endif // targetEnvironment
 }
 
 func createTemporaryDirectory() -> String {
     let template = "\(temporaryDirectory)/.NIOTests-temp-dir_XXXXXX"
-    
+
     var templateBytes = template.utf8 + [0]
     let templateBytesCount = templateBytes.count
     templateBytes.withUnsafeMutableBufferPointer { ptr in
@@ -152,7 +151,7 @@ func openTemporaryFile() -> (CInt, String) {
     let templateBytesCount = templateBytes.count
     let fd = templateBytes.withUnsafeMutableBufferPointer { ptr in
         ptr.baseAddress!.withMemoryRebound(to: Int8.self, capacity: templateBytesCount) { (ptr: UnsafeMutablePointer<Int8>) in
-            return mkstemp(ptr)
+            mkstemp(ptr)
         }
     }
     templateBytes.removeLast()
@@ -162,7 +161,7 @@ func openTemporaryFile() -> (CInt, String) {
 extension Channel {
     func syncCloseAcceptingAlreadyClosed() throws {
         do {
-            try self.close().wait()
+            try close().wait()
         } catch ChannelError.alreadyClosed {
             /* we're happy with this one */
         } catch let e {
@@ -171,34 +170,34 @@ extension Channel {
     }
 }
 
-final class ByteCountingHandler : ChannelInboundHandler, RemovableChannelHandler {
+final class ByteCountingHandler: ChannelInboundHandler, RemovableChannelHandler {
     typealias InboundIn = ByteBuffer
-    
+
     private let numBytes: Int
     private let promise: EventLoopPromise<ByteBuffer>
     private var buffer: ByteBuffer!
-    
+
     init(numBytes: Int, promise: EventLoopPromise<ByteBuffer>) {
         self.numBytes = numBytes
         self.promise = promise
     }
-    
+
     func handlerAdded(context: ChannelHandlerContext) {
         buffer = context.channel.allocator.buffer(capacity: numBytes)
-        if self.numBytes == 0 {
-            self.promise.succeed(buffer)
+        if numBytes == 0 {
+            promise.succeed(buffer)
         }
     }
-    
-    func channelRead(context: ChannelHandlerContext, data: NIOAny) {
-        var currentBuffer = self.unwrapInboundIn(data)
+
+    func channelRead(context _: ChannelHandlerContext, data: NIOAny) {
+        var currentBuffer = unwrapInboundIn(data)
         buffer.writeBuffer(&currentBuffer)
-        
+
         if buffer.readableBytes == numBytes {
             promise.succeed(buffer)
         }
     }
-    
+
     func assertReceived(buffer: ByteBuffer) throws {
         let received = try promise.futureResult.wait()
         XCTAssertEqual(buffer, received)
@@ -207,16 +206,16 @@ final class ByteCountingHandler : ChannelInboundHandler, RemovableChannelHandler
 
 final class NonAcceptingServerSocket: ServerSocket {
     private var errors: [Int32]
-    
+
     init(errors: [Int32]) throws {
         // Reverse so it's cheaper to remove errors.
         self.errors = errors.reversed()
         try super.init(protocolFamily: AF_INET, setNonBlocking: true)
     }
-    
-    override func accept(setNonBlocking: Bool) throws -> Socket? {
-        if let err = self.errors.last {
-            _ = self.errors.removeLast()
+
+    override func accept(setNonBlocking _: Bool) throws -> Socket? {
+        if let err = errors.last {
+            _ = errors.removeLast()
             throw IOError(errnoCode: err, reason: "accept")
         }
         return nil
@@ -228,14 +227,14 @@ func assertSetGetOptionOnOpenAndClosed<Option: ChannelOption>(channel: Channel, 
     _ = try channel.getOption(option).wait()
     try channel.close().wait()
     try channel.closeFuture.wait()
-    
+
     do {
         _ = try channel.setOption(option, value: value).wait()
         // We're okay with no error
     } catch let err as ChannelError where err == .ioOnClosedChannel {
         // as well as already closed channels.
     }
-    
+
     do {
         _ = try channel.getOption(option).wait()
         // We're okay with no error
@@ -260,12 +259,12 @@ func assertNoThrowWithValue<T>(_ body: @autoclosure () throws -> T, defaultValue
 func resolverDebugInformation(eventLoop: EventLoop, host: String, previouslyReceivedResult: SocketAddress) throws -> String {
     func printSocketAddress(_ socketAddress: SocketAddress) -> String {
         switch socketAddress {
-        case .unixDomainSocket(_):
+        case .unixDomainSocket:
             return "uds"
-        case .v4(let sa):
+        case let .v4(sa):
             var addr = sa.address
             return addr.addressDescription()
-        case .v6(let sa):
+        case let .v6(sa):
             var addr = sa.address
             return addr.addressDescription()
         }
@@ -273,7 +272,7 @@ func resolverDebugInformation(eventLoop: EventLoop, host: String, previouslyRece
     let res = GetaddrinfoResolver(loop: eventLoop, aiSocktype: Posix.SOCK_STREAM, aiProtocol: Posix.IPPROTO_TCP)
     let ipv6Results = try assertNoThrowWithValue(res.initiateAAAAQuery(host: host, port: 0).wait()).map(printSocketAddress)
     let ipv4Results = try assertNoThrowWithValue(res.initiateAQuery(host: host, port: 0).wait()).map(printSocketAddress)
-    
+
     return """
     when trying to resolve '\(host)' we've got the following results:
     - previous try: \(printSocketAddress(previouslyReceivedResult))
@@ -286,12 +285,12 @@ func resolverDebugInformation(eventLoop: EventLoop, host: String, previouslyRece
 func assert(_ condition: @autoclosure () -> Bool, within time: TimeAmount, testInterval: TimeAmount? = nil, _ message: String = "condition not satisfied in time", file: StaticString = #file, line: UInt = #line) {
     let testInterval = testInterval ?? TimeAmount.nanoseconds(time.nanoseconds / 5)
     let endTime = NIODeadline.now() + time
-    
+
     repeat {
         if condition() { return }
         usleep(UInt32(testInterval.nanoseconds / 1000))
-    } while (NIODeadline.now() < endTime)
-    
+    } while NIODeadline.now() < endTime
+
     if !condition() {
         XCTFail(message, file: file, line: line)
     }
@@ -299,10 +298,10 @@ func assert(_ condition: @autoclosure () -> Bool, within time: TimeAmount, testI
 
 func getBoolSocketOption<IntType: SignedInteger>(channel: Channel, level: IntType, name: SocketOptionName,
                                                  file: StaticString = #file, line: UInt = #line) throws -> Bool {
-    return try assertNoThrowWithValue(channel.getOption(ChannelOptions.socket(SocketOptionLevel(level),
-                                                                              name)),
-                                      file: file,
-                                      line: line).wait() != 0
+    try assertNoThrowWithValue(channel.getOption(ChannelOptions.socket(SocketOptionLevel(level),
+                                                                       name)),
+                               file: file,
+                               line: line).wait() != 0
 }
 
 func assertSuccess<Value>(_ result: Result<Value, Error>, file: StaticString = #file, line: UInt = #line) {
@@ -319,9 +318,9 @@ func assertFailure<Value>(_ result: Result<Value, Error>, file: StaticString = #
 final class FulfillOnFirstEventHandler: ChannelDuplexHandler {
     typealias InboundIn = Any
     typealias OutboundIn = Any
-    
+
     struct ExpectedEventMissing: Error {}
-    
+
     private let channelRegisteredPromise: EventLoopPromise<Void>?
     private let channelUnregisteredPromise: EventLoopPromise<Void>?
     private let channelActivePromise: EventLoopPromise<Void>?
@@ -339,7 +338,7 @@ final class FulfillOnFirstEventHandler: ChannelDuplexHandler {
     private let readPromise: EventLoopPromise<Void>?
     private let closePromise: EventLoopPromise<Void>?
     private let triggerUserOutboundEventPromise: EventLoopPromise<Void>?
-    
+
     init(channelRegisteredPromise: EventLoopPromise<Void>? = nil,
          channelUnregisteredPromise: EventLoopPromise<Void>? = nil,
          channelActivePromise: EventLoopPromise<Void>? = nil,
@@ -375,109 +374,109 @@ final class FulfillOnFirstEventHandler: ChannelDuplexHandler {
         self.closePromise = closePromise
         self.triggerUserOutboundEventPromise = triggerUserOutboundEventPromise
     }
-    
-    func handlerRemoved(context: ChannelHandlerContext) {
-        self.channelRegisteredPromise?.fail(ExpectedEventMissing())
-        self.channelUnregisteredPromise?.fail(ExpectedEventMissing())
-        self.channelActivePromise?.fail(ExpectedEventMissing())
-        self.channelInactivePromise?.fail(ExpectedEventMissing())
-        self.channelReadPromise?.fail(ExpectedEventMissing())
-        self.channelReadCompletePromise?.fail(ExpectedEventMissing())
-        self.channelWritabilityChangedPromise?.fail(ExpectedEventMissing())
-        self.userInboundEventTriggeredPromise?.fail(ExpectedEventMissing())
-        self.errorCaughtPromise?.fail(ExpectedEventMissing())
-        self.registerPromise?.fail(ExpectedEventMissing())
-        self.bindPromise?.fail(ExpectedEventMissing())
-        self.connectPromise?.fail(ExpectedEventMissing())
-        self.writePromise?.fail(ExpectedEventMissing())
-        self.flushPromise?.fail(ExpectedEventMissing())
-        self.readPromise?.fail(ExpectedEventMissing())
-        self.closePromise?.fail(ExpectedEventMissing())
-        self.triggerUserOutboundEventPromise?.fail(ExpectedEventMissing())
+
+    func handlerRemoved(context _: ChannelHandlerContext) {
+        channelRegisteredPromise?.fail(ExpectedEventMissing())
+        channelUnregisteredPromise?.fail(ExpectedEventMissing())
+        channelActivePromise?.fail(ExpectedEventMissing())
+        channelInactivePromise?.fail(ExpectedEventMissing())
+        channelReadPromise?.fail(ExpectedEventMissing())
+        channelReadCompletePromise?.fail(ExpectedEventMissing())
+        channelWritabilityChangedPromise?.fail(ExpectedEventMissing())
+        userInboundEventTriggeredPromise?.fail(ExpectedEventMissing())
+        errorCaughtPromise?.fail(ExpectedEventMissing())
+        registerPromise?.fail(ExpectedEventMissing())
+        bindPromise?.fail(ExpectedEventMissing())
+        connectPromise?.fail(ExpectedEventMissing())
+        writePromise?.fail(ExpectedEventMissing())
+        flushPromise?.fail(ExpectedEventMissing())
+        readPromise?.fail(ExpectedEventMissing())
+        closePromise?.fail(ExpectedEventMissing())
+        triggerUserOutboundEventPromise?.fail(ExpectedEventMissing())
     }
-    
+
     func channelRegistered(context: ChannelHandlerContext) {
-        self.channelRegisteredPromise?.succeed(())
+        channelRegisteredPromise?.succeed(())
         context.fireChannelRegistered()
     }
-    
+
     func channelUnregistered(context: ChannelHandlerContext) {
-        self.channelUnregisteredPromise?.succeed(())
+        channelUnregisteredPromise?.succeed(())
         context.fireChannelUnregistered()
     }
-    
+
     func channelActive(context: ChannelHandlerContext) {
-        self.channelActivePromise?.succeed(())
+        channelActivePromise?.succeed(())
         context.fireChannelActive()
     }
-    
+
     func channelInactive(context: ChannelHandlerContext) {
-        self.channelInactivePromise?.succeed(())
+        channelInactivePromise?.succeed(())
         context.fireChannelInactive()
     }
-    
+
     func channelRead(context: ChannelHandlerContext, data: NIOAny) {
-        self.channelReadPromise?.succeed(())
+        channelReadPromise?.succeed(())
         context.fireChannelRead(data)
     }
-    
+
     func channelReadComplete(context: ChannelHandlerContext) {
-        self.channelReadCompletePromise?.succeed(())
+        channelReadCompletePromise?.succeed(())
         context.fireChannelReadComplete()
     }
-    
+
     func channelWritabilityChanged(context: ChannelHandlerContext) {
-        self.channelWritabilityChangedPromise?.succeed(())
+        channelWritabilityChangedPromise?.succeed(())
         context.fireChannelWritabilityChanged()
     }
-    
+
     func userInboundEventTriggered(context: ChannelHandlerContext, event: Any) {
-        self.userInboundEventTriggeredPromise?.succeed(())
+        userInboundEventTriggeredPromise?.succeed(())
         context.fireUserInboundEventTriggered(event)
     }
-    
+
     func errorCaught(context: ChannelHandlerContext, error: Error) {
-        self.errorCaughtPromise?.succeed(())
+        errorCaughtPromise?.succeed(())
         context.fireErrorCaught(error)
     }
-    
+
     func register(context: ChannelHandlerContext, promise: EventLoopPromise<Void>?) {
-        self.registerPromise?.succeed(())
+        registerPromise?.succeed(())
         context.register(promise: promise)
     }
-    
+
     func bind(context: ChannelHandlerContext, to: SocketAddress, promise: EventLoopPromise<Void>?) {
-        self.bindPromise?.succeed(())
+        bindPromise?.succeed(())
         context.bind(to: to, promise: promise)
     }
-    
+
     func connect(context: ChannelHandlerContext, to: SocketAddress, promise: EventLoopPromise<Void>?) {
-        self.connectPromise?.succeed(())
+        connectPromise?.succeed(())
         context.connect(to: to, promise: promise)
     }
-    
+
     func write(context: ChannelHandlerContext, data: NIOAny, promise: EventLoopPromise<Void>?) {
-        self.writePromise?.succeed(())
+        writePromise?.succeed(())
         context.write(data, promise: promise)
     }
-    
+
     func flush(context: ChannelHandlerContext) {
-        self.flushPromise?.succeed(())
+        flushPromise?.succeed(())
         context.flush()
     }
-    
+
     func read(context: ChannelHandlerContext) {
-        self.readPromise?.succeed(())
+        readPromise?.succeed(())
         context.read()
     }
-    
+
     func close(context: ChannelHandlerContext, mode: CloseMode, promise: EventLoopPromise<Void>?) {
-        self.closePromise?.succeed(())
+        closePromise?.succeed(())
         context.close(mode: mode, promise: promise)
     }
-    
+
     func triggerUserOutboundEvent(context: ChannelHandlerContext, event: Any, promise: EventLoopPromise<Void>?) {
-        self.triggerUserOutboundEventPromise?.succeed(())
+        triggerUserOutboundEventPromise?.succeed(())
         context.triggerUserOutboundEvent(event, promise: promise)
     }
 }
@@ -490,7 +489,7 @@ func forEachActiveChannelType<T>(file: StaticString = #file,
         XCTAssertNoThrow(try group.syncShutdownGracefully())
     }
     let channelEL = group.next()
-    
+
     let lock = Lock()
     var ret: [T] = []
     _ = try forEachCrossConnectedStreamChannelPair(file: file, line: line) { (chan1: Channel, chan2: Channel) throws -> Void in
@@ -502,18 +501,18 @@ func forEachActiveChannelType<T>(file: StaticString = #file,
             ret.append(contentsOf: innerRet)
         }
     }
-    
+
     // UDP
     let udpChannel = DatagramBootstrap(group: channelEL)
         .channelInitializer { channel in
             XCTAssert(channel.eventLoop.inEventLoop)
             return channelEL.makeSucceededFuture(())
-    }
-    .bind(host: "127.0.0.1", port: 0)
+        }
+        .bind(host: "127.0.0.1", port: 0)
     defer {
         XCTAssertNoThrow(try udpChannel.wait().syncCloseAcceptingAlreadyClosed())
     }
-    
+
     return try lock.withLock {
         ret.append(try body(udpChannel.wait()))
         return ret
@@ -522,8 +521,8 @@ func forEachActiveChannelType<T>(file: StaticString = #file,
 
 func withTCPServerChannel<R>(bindTarget: SocketAddress? = nil,
                              group: EventLoopGroup,
-                             file: StaticString = #file,
-                             line: UInt = #line,
+                             file _: StaticString = #file,
+                             line _: UInt = #line,
                              _ body: (Channel) throws -> R) throws -> R {
     let server = try ServerBootstrap(group: group)
         .serverChannelOption(ChannelOptions.socket(.init(SOL_SOCKET), .init(SO_REUSEADDR)), value: 1)
@@ -560,7 +559,7 @@ func withCrossConnectedSockAddrChannels<R>(bindTarget: SocketAddress,
     }
     let serverChannelEL = serverGroup.next()
     let clientChannelEL = clientGroup.next()
-    
+
     let tcpAcceptedChannel = serverChannelEL.makePromise(of: Channel.self)
     let tcpServerChannel = try assertNoThrowWithValue(ServerBootstrap(group: serverChannelEL)
         .childChannelInitializer { channel in
@@ -569,41 +568,41 @@ func withCrossConnectedSockAddrChannels<R>(bindTarget: SocketAddress,
                 channel
             }.cascade(to: tcpAcceptedChannel)
             return channel.pipeline.addHandler(FulfillOnFirstEventHandler(channelActivePromise: accepted))
-    }
-    .bind(to: bindTarget)
-    .wait(), file: file, line: line)
+        }
+        .bind(to: bindTarget)
+        .wait(), file: file, line: line)
     defer {
         XCTAssertNoThrow(try tcpServerChannel.syncCloseAcceptingAlreadyClosed())
     }
-    
+
     let tcpClientChannel = try assertNoThrowWithValue(ClientBootstrap(group: clientChannelEL)
         .channelInitializer { channel in
             XCTAssert(channel.eventLoop.inEventLoop)
             return channel.eventLoop.makeSucceededFuture(())
-    }
-    .connect(to: tcpServerChannel.localAddress!)
-    .wait())
+        }
+        .connect(to: tcpServerChannel.localAddress!)
+        .wait())
     defer {
         XCTAssertNoThrow(try tcpClientChannel.syncCloseAcceptingAlreadyClosed())
     }
-    
+
     return try body(try tcpAcceptedChannel.futureResult.wait(), tcpClientChannel)
 }
 
 func withCrossConnectedTCPChannels<R>(forceSeparateEventLoops: Bool = false,
-                                      file: StaticString = #file,
-                                      line: UInt = #line,
+                                      file _: StaticString = #file,
+                                      line _: UInt = #line,
                                       _ body: (Channel, Channel) throws -> R) throws -> R {
-    return try withCrossConnectedSockAddrChannels(bindTarget: .init(ipAddress: "127.0.0.1", port: 0),
-                                                  forceSeparateEventLoops: forceSeparateEventLoops,
-                                                  body)
+    try withCrossConnectedSockAddrChannels(bindTarget: .init(ipAddress: "127.0.0.1", port: 0),
+                                           forceSeparateEventLoops: forceSeparateEventLoops,
+                                           body)
 }
 
 func withCrossConnectedUnixDomainSocketChannels<R>(forceSeparateEventLoops: Bool = false,
-                                                   file: StaticString = #file,
-                                                   line: UInt = #line,
+                                                   file _: StaticString = #file,
+                                                   line _: UInt = #line,
                                                    _ body: (Channel, Channel) throws -> R) throws -> R {
-    return try withTemporaryDirectory { tempDir in
+    try withTemporaryDirectory { tempDir in
         let bindTarget = try SocketAddress(unixDomainSocketPath: tempDir + "/s")
         return try withCrossConnectedSockAddrChannels(bindTarget: bindTarget,
                                                       forceSeparateEventLoops: forceSeparateEventLoops,
@@ -629,9 +628,9 @@ func withCrossConnectedPipeChannels<R>(forceSeparateEventLoops: Bool = false,
         // may fail if pipe1Group == pipe2Group
         try? channel2Group.syncShutdownGracefully()
     }
-    
-    var result: R? = nil
-    
+
+    var result: R?
+
     XCTAssertNoThrow(try withPipe { pipe1Read, pipe1Write -> [NIOFileHandle] in
         try withPipe { pipe2Read, pipe2Write -> [NIOFileHandle] in
             try pipe1Read.withUnsafeFileDescriptor { pipe1Read in
@@ -667,8 +666,8 @@ func withCrossConnectedPipeChannels<R>(forceSeparateEventLoops: Bool = false,
 }
 
 func forEachCrossConnectedStreamChannelPair<R>(forceSeparateEventLoops: Bool = false,
-                                               file: StaticString = #file,
-                                               line: UInt = #line,
+                                               file _: StaticString = #file,
+                                               line _: UInt = #line,
                                                _ body: (Channel, Channel) throws -> R) throws -> [R] {
     let r1 = try withCrossConnectedTCPChannels(forceSeparateEventLoops: forceSeparateEventLoops, body)
     let r2 = try withCrossConnectedPipeChannels(forceSeparateEventLoops: forceSeparateEventLoops, body)
@@ -678,11 +677,11 @@ func forEachCrossConnectedStreamChannelPair<R>(forceSeparateEventLoops: Bool = f
 
 extension EventLoopFuture {
     var isFulfilled: Bool {
-        if self.eventLoop.inEventLoop {
+        if eventLoop.inEventLoop {
             // Easy, we're on the EventLoop. Let's just use our knowledge that we run completed future callbacks
             // immediately.
             var fulfilled = false
-            self.whenComplete { _ in
+            whenComplete { _ in
                 fulfilled = true
             }
             return fulfilled
@@ -690,9 +689,9 @@ extension EventLoopFuture {
             let lock = Lock()
             let group = DispatchGroup()
             var fulfilled = false // protected by lock
-            
+
             group.enter()
-            self.eventLoop.execute {
+            eventLoop.execute {
                 let isFulfilled = self.isFulfilled // This will now enter the above branch.
                 lock.withLock {
                     fulfilled = isFulfilled
