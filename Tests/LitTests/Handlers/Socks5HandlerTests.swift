@@ -73,4 +73,15 @@ class Socks5HandlerTests: XCTestCase {
         try testConnectWith(host: "localhost", port: 80)
         try testConnectWith(host: "google.com", port: 443)
     }
+
+    func testSocks5Encoder() throws {
+        let channel = EmbeddedChannel(handler: MessageToByteHandler(Socks5Encoder()))
+        try channel.writeOutbound(Socks5Response.method)
+        var buffer: ByteBuffer = try channel.readOutbound()!
+        XCTAssertEqual(buffer.readBytes(length: buffer.readableBytes)!, [5, 0])
+
+        try channel.writeOutbound(Socks5Response.connected(.succeeded))
+        buffer = try channel.readOutbound()!
+        XCTAssertEqual(buffer.readBytes(length: buffer.readableBytes)!, [5, 0, 0, 1, 0, 0, 0, 0, 0, 0])
+    }
 }
