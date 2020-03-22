@@ -156,7 +156,7 @@ class Socks5Decoder: ByteToMessageDecoder {
         }
 
         guard buffer.readableBytes == methodCount else {
-            if methodCount > buffer.readableBytes {
+            if methodCount < buffer.readableBytes {
                 throw Socks5HandlerError.tooManyMethods
             } else {
                 buffer.moveReaderIndex(to: buffer.readerIndex - 2)
@@ -165,7 +165,7 @@ class Socks5Decoder: ByteToMessageDecoder {
         }
 
         // Don't support any auth yet
-        guard buffer.readBytes(length: Int(methodCount))!.reduce(false, { $1 == 0 }) else {
+        guard buffer.readBytes(length: Int(methodCount))!.reduce(false, { $0 || $1 == 0 }) else {
             throw Socks5HandlerError.noSupportedMethod
         }
 
@@ -195,7 +195,7 @@ class Socks5Decoder: ByteToMessageDecoder {
         switch buffer.readInteger(as: UInt8.self) {
         case 1:
             guard buffer.readableBytes == 6 else {
-                buffer.moveReaderIndex(to: buffer.readerIndex - 3)
+                buffer.moveReaderIndex(to: buffer.readerIndex - 4)
                 return .needMoreData
             }
 
@@ -204,7 +204,7 @@ class Socks5Decoder: ByteToMessageDecoder {
             addr.sin_addr = buffer.readWithUnsafeReadableBytes {
                 (4, $0.load(as: in_addr.self))
             }
-            addr.sin_port = buffer.readInteger(endianness: .big, as: UInt16.self)!
+            addr.sin_port = buffer.readInteger(endianness: .big, as: UInt16.self)!.bigEndian
             context.fireChannelRead(wrapInboundOut(.connectToAddress(SocketAddress(addr, host: ""))))
             status = .done
         case 3:
@@ -214,7 +214,7 @@ class Socks5Decoder: ByteToMessageDecoder {
 
             guard buffer.readableBytes == domainLength + 2 else {
                 if buffer.readableBytes < domainLength + 2 {
-                    buffer.moveReaderIndex(to: buffer.readerIndex - 4)
+                    buffer.moveReaderIndex(to: buffer.readerIndex - 5)
                     return .needMoreData
                 } else {
                     throw Socks5HandlerError.protocolError
@@ -226,12 +226,17 @@ class Socks5Decoder: ByteToMessageDecoder {
             context.fireChannelRead(wrapInboundOut(.connectTo(host: host, port: Int(port))))
             status = .done
         case 4:
+            guard buffer.readableBytes == 18 else {
+                buffer.moveReaderIndex(to: buffer.readerIndex - 4)
+                return .needMoreData
+            }
+
             var addr = sockaddr_in6()
             addr.sin6_family = sa_family_t(AF_INET6)
             addr.sin6_addr = buffer.readWithUnsafeReadableBytes {
                 (16, $0.load(as: in6_addr.self))
             }
-            addr.sin6_port = buffer.readInteger(endianness: .big, as: UInt16.self)!
+            addr.sin6_port = buffer.readInteger(endianness: .big, as: UInt16.self)!.bigEndian
             context.fireChannelRead(wrapInboundOut(.connectToAddress(SocketAddress(addr, host: ""))))
             status = .done
         default:

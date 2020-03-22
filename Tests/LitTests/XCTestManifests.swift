@@ -6,6 +6,9 @@
         //   `swift test --generate-linuxmain`
         // to regenerate.
         static let __allTests__Socks5HandlerTests = [
+            ("testSocks5DecoderWithHost", testSocks5DecoderWithHost),
+            ("testSocks5DecoderWithIpConnect", testSocks5DecoderWithIpConnect),
+            ("testSocks5DecoderWithMethods", testSocks5DecoderWithMethods),
             ("testSocks5DecoderWithOneMethod", testSocks5DecoderWithOneMethod),
         ]
     }
