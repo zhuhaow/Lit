@@ -10,6 +10,7 @@
             ("testSocks5DecoderWithIpConnect", testSocks5DecoderWithIpConnect),
             ("testSocks5DecoderWithMethods", testSocks5DecoderWithMethods),
             ("testSocks5DecoderWithOneMethod", testSocks5DecoderWithOneMethod),
+            ("testSocks5Encoder", testSocks5Encoder),
         ]
     }
 
