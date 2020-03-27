@@ -75,7 +75,7 @@ class Socks5HandlerTests: XCTestCase {
     }
 
     func testSocks5Encoder() throws {
-        let channel = EmbeddedChannel(handler: MessageToByteHandler(Socks5Encoder()))
+        let channel = EmbeddedChannel(handler: Socks5Encoder())
         try channel.writeOutbound(Socks5Response.method)
         var buffer: ByteBuffer = try channel.readOutbound()!
         XCTAssertEqual(buffer.readBytes(length: buffer.readableBytes)!, [5, 0])
@@ -83,5 +83,70 @@ class Socks5HandlerTests: XCTestCase {
         try channel.writeOutbound(Socks5Response.connected(.succeeded))
         buffer = try channel.readOutbound()!
         XCTAssertEqual(buffer.readBytes(length: buffer.readableBytes)!, [5, 0, 0, 1, 0, 0, 0, 0, 0, 0])
+    }
+
+    func testSocks5Handler() throws {
+        let group = MultiThreadedEventLoopGroup(numberOfThreads: System.coreCount)
+        defer {
+            try! group.syncShutdownGracefully()
+        }
+
+        let echoChannel = try ServerBootstrap(group: group)
+            .serverChannelOption(ChannelOptions.socket(SocketOptionLevel(SOL_SOCKET), SO_REUSEADDR), value: 1)
+            .childChannelInitializer { channel in
+                channel.pipeline.addHandler(EchoHandler())
+            }
+            .childChannelOption(ChannelOptions.socket(SocketOptionLevel(SOL_SOCKET), SO_REUSEADDR), value: 1)
+            .bind(host: "127.0.0.1", port: 0).wait()
+
+        let socks5Channel = try ServerBootstrap(group: group)
+            .serverChannelOption(ChannelOptions.socket(SocketOptionLevel(SOL_SOCKET), SO_REUSEADDR), value: 1)
+            .childChannelInitializer { channel in
+                Socks5Handler(connector: TcpConnector()).addSelfAndCodec(to: channel.pipeline)
+            }
+            .childChannelOption(ChannelOptions.socket(SocketOptionLevel(SOL_SOCKET), SO_REUSEADDR), value: 1)
+            .bind(host: "127.0.0.1", port: 0).wait()
+
+        enum State {
+            case readAuthResponse
+            case readConnectResponse
+            case readData
+        }
+
+        var state = State.readAuthResponse
+        let recordingHandler = RecordingHandler<ByteBuffer>() { _, context in
+            switch state {
+            case .readAuthResponse:
+                var buffer = context.channel.allocator.buffer(capacity: 0)
+                buffer.writeBytes([5, 1, 0, 1, 127, 0, 0, 1])
+                buffer.writeInteger(UInt16(echoChannel.localAddress!.port!), endianness: .big)
+                context.writeAndFlush(NIOAny(buffer), promise: nil)
+                state = .readConnectResponse
+            case .readConnectResponse:
+                var buffer = context.channel.allocator.buffer(capacity: 0)
+                buffer.writeBytes([1, 3, 5])
+                context.writeAndFlush(NIOAny(buffer), promise: nil)
+                state = .readData
+            case .readData:
+                context.close(promise: nil)
+            }
+        }
+
+        let client = try TcpConnector().connect(on: group.next(), to: socks5Channel.localAddress!).wait()
+        try client.pipeline.addHandler(recordingHandler).wait()
+
+        var buffer = client.allocator.buffer(capacity: 0)
+        buffer.writeBytes([5, 1, 0])
+        try client.writeAndFlush(buffer).wait()
+
+        try client.closeFuture.wait()
+        try echoChannel.syncCloseAcceptingAlreadyClosed()
+        try socks5Channel.syncCloseAcceptingAlreadyClosed()
+
+        var inboundData = recordingHandler.inboundData
+        XCTAssertEqual(inboundData.count, 3)
+        XCTAssertEqual(inboundData[0].readBytes(length: inboundData[0].readableBytes)!, [5, 0])
+        XCTAssertEqual(inboundData[1].readBytes(length: inboundData[1].readableBytes)!, [5, 0, 0, 1, 0, 0, 0, 0, 0, 0])
+        XCTAssertEqual(inboundData[2].readBytes(length: inboundData[2].readableBytes)!, [1, 3, 5])
     }
 }

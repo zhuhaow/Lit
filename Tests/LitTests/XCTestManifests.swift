@@ -11,6 +11,7 @@
             ("testSocks5DecoderWithMethods", testSocks5DecoderWithMethods),
             ("testSocks5DecoderWithOneMethod", testSocks5DecoderWithOneMethod),
             ("testSocks5Encoder", testSocks5Encoder),
+            ("testSocks5Handler", testSocks5Handler),
         ]
     }
 

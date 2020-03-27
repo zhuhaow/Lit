@@ -14,7 +14,9 @@ public enum Socks5HandlerError: Error {
 public enum Socks5Request: Equatable {
     case method
     case connectToAddress(SocketAddress)
-    case connectTo(host: String, port: Int)
+    // Avoid heap allocation
+    // https://github.com/apple/swift-nio/blob/master/docs/optimization-tips.md#wrapping-types-in-nioany
+    indirect case connectTo(host: String, port: Int)
 }
 
 public enum Socks5ResponseType: UInt8 {
@@ -33,13 +35,7 @@ public enum Socks5Response: Equatable {
     case connected(Socks5ResponseType)
 }
 
-public final class Socks5Handler: ChannelDuplexHandler, RemovableChannelHandler {
-    public typealias InboundIn = Socks5Request
-    public typealias InboundOut = Never
-
-    public typealias OutboundIn = Never
-    public typealias OutboundOut = Socks5Response
-
+public final class Socks5Handler {
     enum Socks5HandlerStatus {
         case readingVersionAndMethods
         case readingConnectHeader
@@ -47,37 +43,46 @@ public final class Socks5Handler: ChannelDuplexHandler, RemovableChannelHandler 
 
     let connector: Connector
     var status: Socks5HandlerStatus = .readingVersionAndMethods
+    var handshaking = true
+    var pendingData: [NIOAny] = []
 
     init(connector: Connector) {
         self.connector = connector
     }
+}
+
+extension Socks5Handler: ChannelDuplexHandler {
+    public typealias InboundIn = Socks5Request
+    public typealias InboundOut = Never
+
+    public typealias OutboundIn = Never
+    public typealias OutboundOut = Socks5Response
 
     private static let encoderHandlerName = "LIT_SOCKS5_ENCODER"
     private static let decoderHandlerName = "LIT_SOCKS5_DECODER"
 
     public func addSelfAndCodec(to pipeline: ChannelPipeline) -> EventLoopFuture<Void> {
-        pipeline.addHandler(ByteToMessageHandler(Socks5Decoder()), name: Socks5Handler.decoderHandlerName, position: .last)
-            .flatMap {
-                pipeline.addHandler(MessageToByteHandler(Socks5Encoder()), name: Socks5Handler.encoderHandlerName, position: .last)
-            }
-            .flatMap {
-                pipeline.addHandler(self)
-            }
-    }
-
-    public func handlerAdded(context: ChannelHandlerContext) {
-        context.read()
+        pipeline
+            .addHandler(ByteToMessageHandler(Socks5Decoder()), name: Socks5Handler.decoderHandlerName)
+            .flatMap { pipeline.addHandler(Socks5Encoder(), name: Socks5Handler.encoderHandlerName) }
+            .flatMap { pipeline.addHandler(self) }
     }
 
     public func channelRead(context: ChannelHandlerContext, data: NIOAny) {
+        guard handshaking else {
+            pendingData.append(data)
+            return
+        }
+
         let request = unwrapInboundIn(data)
 
         let future: EventLoopFuture<Channel>
         switch request {
         case .method:
-            context.write(wrapOutboundOut(.method)).whenSuccess {
-                context.read()
-            }
+            context.writeAndFlush(wrapOutboundOut(.method))
+                .whenSuccess {
+                    context.read()
+                }
             return
         case let .connectToAddress(address):
             future = connector.connect(on: context.eventLoop, to: address)
@@ -88,35 +93,51 @@ public final class Socks5Handler: ChannelDuplexHandler, RemovableChannelHandler 
         future.whenComplete { result in
             switch result {
             case let .success(channel):
-                context.writeAndFlush(self.wrapOutboundOut(.connected(.succeeded)), promise: nil)
+                self.handshaking = false
 
-                let (localGlue, peerGlue) = GlueHandler.matchedPair()
-                // Note this all happens in the same event loop so the handlers are properly set up when this block is finished.
-                // No need to worry if there will be any data coming in in the middle.
-                context.channel.pipeline.addHandler(localGlue).and(channel.pipeline.addHandler(peerGlue))
-                    .flatMap { _ in
+                context.pipeline.removeHandler(name: Socks5Handler.decoderHandlerName)
+                    .flatMap { context.writeAndFlush(self.wrapOutboundOut(.connected(.succeeded))) }
+                    .flatMap { context.pipeline.removeHandler(name: Socks5Handler.encoderHandlerName) }
+                    .flatMap {
+                        let (localGlue, peerGlue) = GlueHandler.matchedPair()
+                        return context.pipeline.addHandler(localGlue)
+                            .and(channel.pipeline.addHandler(peerGlue)).map { _ in () }
+                    }
+                    .flatMap {
                         context.pipeline.removeHandler(self)
-                            .flatMap {
-                                context.pipeline.removeHandler(name: Socks5Handler.decoderHandlerName)
-                                    .flatMap {
-                                        context.pipeline.removeHandler(name: Socks5Handler.encoderHandlerName)
-                                    }
-                            }
                     }
                     .whenComplete { result in
                         switch result {
                         case .success:
-                            context.read()
-                            channel.read()
+                            break
                         case let .failure(error):
                             context.fireErrorCaught(error)
                         }
                     }
+
             case let .failure(error):
                 // TODO: write error back
                 context.fireErrorCaught(error)
             }
         }
+    }
+}
+
+extension Socks5Handler: RemovableChannelHandler {
+    public func removeHandler(context: ChannelHandlerContext, removalToken: ChannelHandlerContext.RemovalToken) {
+        let hasPending = !pendingData.isEmpty
+
+        // Avoid using `forEach` which might require the data to be copied
+        while !pendingData.isEmpty {
+            let data = pendingData.removeFirst()
+            context.fireChannelRead(data)
+        }
+
+        if hasPending {
+            context.fireChannelReadComplete()
+        }
+
+        context.leavePipeline(removalToken: removalToken)
     }
 }
 
@@ -252,11 +273,13 @@ class Socks5Decoder: ByteToMessageDecoder {
     }
 }
 
-class Socks5Encoder: MessageToByteEncoder {
+class Socks5Encoder: ChannelOutboundHandler, RemovableChannelHandler {
     typealias OutboundIn = Socks5Response
+    typealias OutboundOut = ByteBuffer
 
-    func encode(data: Socks5Response, out: inout ByteBuffer) throws {
-        switch data {
+    func write(context: ChannelHandlerContext, data: NIOAny, promise: EventLoopPromise<Void>?) {
+        var out = context.channel.allocator.buffer(capacity: 0)
+        switch unwrapOutboundIn(data) {
         case .method:
             out.writeBytes([5, 0])
         case let .connected(response):
@@ -277,5 +300,7 @@ class Socks5Encoder: MessageToByteEncoder {
                 out.writeBytes([UInt8](repeating: 0, count: 6))
             }
         }
+
+        context.write(wrapOutboundOut(out), promise: promise)
     }
 }
