@@ -75,7 +75,7 @@ class Socks5HandlerTests: XCTestCase {
     }
 
     func testSocks5Encoder() throws {
-        let channel = EmbeddedChannel(handler: Socks5Encoder())
+        let channel = EmbeddedChannel(handler: Socks5EncoderHandler())
         try channel.writeOutbound(Socks5Response.method)
         var buffer: ByteBuffer = try channel.readOutbound()!
         XCTAssertEqual(buffer.readBytes(length: buffer.readableBytes)!, [5, 0])
