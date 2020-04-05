@@ -32,6 +32,8 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - uses: YOCKOW/Action-setup-swift@v1.1.0
+      - name: Generate tests
+        run: swift test --generate-linuxmain
       - name: Test target
         run: swift test -v --enable-code-coverage
       - name: Process coverage report
