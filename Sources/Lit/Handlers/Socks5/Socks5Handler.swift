@@ -9,7 +9,7 @@ public final class Socks5Handler {
     let connector: Connector
     var status: Socks5HandlerStatus = .readingVersionAndMethods
     var handshaking = true
-    var pendingData: [NIOAny] = []
+    var backlog = DataBacklog()
 
     init(connector: Connector) {
         self.connector = connector
@@ -35,7 +35,7 @@ extension Socks5Handler: ChannelDuplexHandler {
 
     public func channelRead(context: ChannelHandlerContext, data: NIOAny) {
         guard handshaking else {
-            pendingData.append(data)
+            backlog.add(data)
             return
         }
 
@@ -90,17 +90,7 @@ extension Socks5Handler: ChannelDuplexHandler {
 
 extension Socks5Handler: RemovableChannelHandler {
     public func removeHandler(context: ChannelHandlerContext, removalToken: ChannelHandlerContext.RemovalToken) {
-        let hasPending = !pendingData.isEmpty
-
-        // Avoid using `forEach` which might require the data to be copied
-        while !pendingData.isEmpty {
-            let data = pendingData.removeFirst()
-            context.fireChannelRead(data)
-        }
-
-        if hasPending {
-            context.fireChannelReadComplete()
-        }
+        backlog.flush(to: context)
 
         context.leavePipeline(removalToken: removalToken)
     }
