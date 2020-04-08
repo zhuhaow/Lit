@@ -7,6 +7,7 @@ class RecordingHandler<In>: ChannelInboundHandler {
     let onRead: (In, ChannelHandlerContext) -> Void
 
     var inboundData: [In] = []
+    var error: Error?
 
     init(onRead: @escaping (In, ChannelHandlerContext) -> Void) {
         self.onRead = onRead
@@ -16,5 +17,10 @@ class RecordingHandler<In>: ChannelInboundHandler {
         inboundData.append(unwrapInboundIn(data))
         context.fireChannelRead(data)
         onRead(unwrapInboundIn(data), context)
+    }
+
+    func errorCaught(context: ChannelHandlerContext, error: Error) {
+        self.error = error
+        context.fireErrorCaught(error)
     }
 }

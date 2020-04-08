@@ -18,7 +18,6 @@ extension HttpProxyHandler {
     public func addSelfAndCodec(to pipeline: ChannelPipeline) -> EventLoopFuture<Void> {
         pipeline
             .addHandler(ByteToMessageHandler(HTTPRequestDecoder(leftOverBytesStrategy: .forwardBytes)), name: HttpProxyHandler.decoderHandlerName)
-            .flatMap { pipeline.addHandler(HTTPResponseEncoder(), name: HttpProxyHandler.encoderHandlerName) }
             .flatMap { pipeline.addHandler(self) }
     }
 }
@@ -52,16 +51,22 @@ extension HttpProxyHandler: ChannelInboundHandler {
 
     private func resignForConnectHandler(context: ChannelHandlerContext) {
         context.pipeline
-            .addHandler(HttpConnectHandler(connector: connector,
-                                           decoderHandlerName: HttpProxyHandler.decoderHandlerName,
-                                           encoderHandlerName: HttpProxyHandler.encoderHandlerName),
-                        name: nil,
-                        position: .after(self))
+            .addHandler(HTTPResponseEncoder(), name: HttpProxyHandler.encoderHandlerName, position: .before(self))
+            .flatMap { context.pipeline.addHandler(HttpConnectHandler(connector: self.connector,
+                                                                      decoderHandlerName: HttpProxyHandler.decoderHandlerName,
+                                                                      encoderHandlerName: HttpProxyHandler.encoderHandlerName),
+                                                   name: nil,
+                                                   position: .after(self))
+            }
             .flatMap { context.pipeline.removeHandler(self) }
             .whenFailure { error in context.fireErrorCaught(error) }
     }
 
-    private func resignForHttpProxyRewriteHandler(context _: ChannelHandlerContext) {}
+    private func resignForHttpProxyRewriteHandler(context: ChannelHandlerContext) {
+        context.pipeline.addHandler(HttpProxyRequestRewriter(connector: connector), position: .after(self))
+            .flatMap { context.pipeline.removeHandler(self) }
+            .whenFailure { error in context.fireErrorCaught(error) }
+    }
 }
 
 extension HttpProxyHandler: RemovableChannelHandler {
