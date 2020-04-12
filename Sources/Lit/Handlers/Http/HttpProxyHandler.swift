@@ -1,12 +1,12 @@
 import NIO
 import NIOHTTP1
 
-class HttpProxyHandler {
+public class HttpProxyHandler {
     let connector: Connector
     var backlog = DataBacklog()
     var readHeader = false
 
-    init(connector: Connector) {
+    public init(connector: Connector) {
         self.connector = connector
     }
 }
@@ -23,9 +23,9 @@ extension HttpProxyHandler {
 }
 
 extension HttpProxyHandler: ChannelInboundHandler {
-    typealias InboundIn = HTTPServerRequestPart
+    public typealias InboundIn = HTTPServerRequestPart
 
-    func channelRead(context: ChannelHandlerContext, data: NIOAny) {
+    public func channelRead(context: ChannelHandlerContext, data: NIOAny) {
         backlog.add(data)
 
         guard !readHeader else {
@@ -70,7 +70,7 @@ extension HttpProxyHandler: ChannelInboundHandler {
 }
 
 extension HttpProxyHandler: RemovableChannelHandler {
-    func removeHandler(context: ChannelHandlerContext, removalToken: ChannelHandlerContext.RemovalToken) {
+    public func removeHandler(context: ChannelHandlerContext, removalToken: ChannelHandlerContext.RemovalToken) {
         backlog.flush(to: context)
 
         context.leavePipeline(removalToken: removalToken)

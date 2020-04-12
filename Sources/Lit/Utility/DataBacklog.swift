@@ -1,13 +1,13 @@
 import NIO
 
-class DataBacklog {
+public class DataBacklog {
     var pendingData: [NIOAny] = []
 
-    func add(_ data: NIOAny) {
+    public func add(_ data: NIOAny) {
         pendingData.append(data)
     }
 
-    func flush(to context: ChannelHandlerContext) {
+    public func flush(to context: ChannelHandlerContext) {
         let hasPending = !pendingData.isEmpty
 
         // Avoid using `forEach` which might require the data to be copied
