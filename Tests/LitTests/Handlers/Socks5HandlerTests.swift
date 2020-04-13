@@ -132,7 +132,7 @@ class Socks5HandlerTests: XCTestCase {
             }
         }
 
-        let client = try TcpConnector().connect(on: group.next(), to: socks5Channel.localAddress!).wait()
+        let client = try TcpConnector().connect(on: group.next(), endpoint: .address(socks5Channel.localAddress!)).wait()
         try client.pipeline.addHandler(recordingHandler).wait()
 
         var buffer = client.allocator.buffer(capacity: 0)

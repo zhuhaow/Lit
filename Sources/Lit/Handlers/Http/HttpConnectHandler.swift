@@ -126,7 +126,7 @@ extension HttpConnectHandler {
 
     private func connectTo(host: String, port: Int, context: ChannelHandlerContext) {
         let channelFuture = connector
-            .connect(on: context.eventLoop, host: String(host), port: port)
+            .connect(on: context.eventLoop, endpoint: .domain(host, port))
 
         channelFuture.whenSuccess { channel in
             self.connectSucceeded(channel: channel, context: context)

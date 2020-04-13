@@ -43,7 +43,7 @@ extension HttpProxyRequestRewriter: ChannelInboundHandler {
                 if firstHeader {
                     connecting = true
                     firstHeader = false
-                    connector.connect(on: context.eventLoop, host: host_, port: port_).whenComplete { result in
+                    connector.connect(on: context.eventLoop, endpoint: .domain(host_, port_)).whenComplete { result in
                         switch result {
                         case let .success(channel):
                             self.glue(channel, context: context)

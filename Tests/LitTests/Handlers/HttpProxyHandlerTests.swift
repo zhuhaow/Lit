@@ -38,7 +38,7 @@ class HttpProxyHandlerTests: XCTestCase {
             connected = true
         }
 
-        let client = try TcpConnector().connect(on: group.next(), to: httpChannel.localAddress!).wait()
+        let client = try TcpConnector().connect(on: group.next(), endpoint: .address(httpChannel.localAddress!)).wait()
         try client.pipeline.addHandler(recordingHandler).wait()
 
         var buffer = client.allocator.buffer(capacity: 0)
@@ -104,7 +104,7 @@ class HttpProxyHandlerTests: XCTestCase {
             pendingRead = 1
         }
 
-        let client = try TcpConnector().connect(on: group.next(), to: httpChannel.localAddress!).wait()
+        let client = try TcpConnector().connect(on: group.next(), endpoint: .address(httpChannel.localAddress!)).wait()
         try client.pipeline.addHandler(recordingHandler).wait()
 
         var buffer = client.allocator.buffer(capacity: 0)

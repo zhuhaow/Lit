@@ -50,9 +50,9 @@ extension Socks5Handler: ChannelDuplexHandler {
                 }
             return
         case let .connectToAddress(address):
-            future = connector.connect(on: context.eventLoop, to: address)
+            future = connector.connect(on: context.eventLoop, endpoint: .address(address))
         case let .connectTo(host: host, port: port):
-            future = connector.connect(on: context.eventLoop, host: host, port: port)
+            future = connector.connect(on: context.eventLoop, endpoint: .domain(host, port))
         }
 
         future.whenComplete { result in
