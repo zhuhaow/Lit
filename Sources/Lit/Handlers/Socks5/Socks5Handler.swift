@@ -11,7 +11,7 @@ public final class Socks5Handler {
     var handshaking = true
     var backlog = DataBacklog()
 
-    init(connector: Connector) {
+    public init(connector: Connector) {
         self.connector = connector
     }
 }
